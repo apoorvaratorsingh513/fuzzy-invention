@@ -1,541 +1,485 @@
-name: LLM Cluster (source build)
+name: Build
 on:
   workflow_dispatch:
     inputs:
-      workers:
-        description: 'Workers this run starts next to the head (max 20 per account, shared with other runs)'
-        type: string
-        default: '19'
-      total:
-        description: 'Only when other runs add workers to this account: total workers across all runs (0 = this run only)'
-        type: string
-        default: '0'
-      join:
-        description: 'Only add workers to a cluster whose head runs in another repo of the same account (this run starts no head)'
+      ubuntu_latest:
+        description: 'Linux / Ubuntu latest (24.04 today) - label moves later'
         type: boolean
         default: false
-      cluster:
-        description: 'Cluster name, the same in every repo of the account that takes part (lowercase letters and digits)'
-        type: string
-        default: llmsrc
-      source:
-        description: 'Link to the llama.cpp source zip of the release tag, built on every runner with the device limit raised from 16 to 32'
-        type: string
-        default: 'https://github.com/ggml-org/llama.cpp/archive/refs/tags/b11612.zip'
-      model:
-        description: 'qwen3-30b-a3b = 18 GB test model, gpt-oss-120b = 63 GB model (needs 5 or more workers)'
-        type: choice
-        options: [qwen3-30b-a3b, gpt-oss-120b]
-        default: qwen3-30b-a3b
-      minutes:
-        description: 'Minutes to keep the model running once it is ready (GitHub stops a job after 6 hours anyway)'
-        type: choice
-        options: ['30', '60', '120', '180', '240', '300', '360']
-        default: '60'
-      windows:
-        description: 'auto = Windows Server 2022 (the Windows 10 generation) first, Windows Server 2025 (the Windows 11 generation) when 2022 is busy'
-        type: choice
-        options: [auto, windows-2022, windows-2025]
-        default: auto
+      ubuntu_24_04:
+        description: 'Linux / Ubuntu 24.04 - no end date yet'
+        type: boolean
+        default: true
+      ubuntu_22_04:
+        description: 'Linux / Ubuntu 22.04 - ends 17 Apr 2027'
+        type: boolean
+        default: false
+      ubuntu_26_04:
+        description: 'Linux / Ubuntu 26.04 (preview) - no end date yet'
+        type: boolean
+        default: false
+      ubuntu_24_04_arm:
+        description: 'Linux / Ubuntu 24.04 ARM64 - no end date yet'
+        type: boolean
+        default: false
+      ubuntu_22_04_arm:
+        description: 'Linux / Ubuntu 22.04 ARM64 - ends 17 Apr 2027'
+        type: boolean
+        default: false
+      ubuntu_26_04_arm:
+        description: 'Linux / Ubuntu 26.04 ARM64 (preview) - no end date yet'
+        type: boolean
+        default: false
+      windows_latest:
+        description: 'Windows / Server 2025 (latest) - no end date yet'
+        type: boolean
+        default: false
+      windows_2025:
+        description: 'Windows / Server 2025 (same machine as latest) - no end date yet'
+        type: boolean
+        default: false
+      windows_2022:
+        description: 'Windows / Server 2022 - no end date yet'
+        type: boolean
+        default: false
+      windows_11_arm:
+        description: 'Windows / 11 ARM64 - no end date yet'
+        type: boolean
+        default: false
+      macos_latest:
+        description: 'macOS / latest (26 today, Apple Silicon) - label moves later'
+        type: boolean
+        default: false
+      macos_26:
+        description: 'macOS / 26 Apple Silicon - no end date yet'
+        type: boolean
+        default: false
+      macos_15:
+        description: 'macOS / 15 Apple Silicon - no end date yet'
+        type: boolean
+        default: false
+      macos_14:
+        description: 'macOS / 14 Apple Silicon - ends 2 Nov 2026'
+        type: boolean
+        default: false
+      macos_26_intel:
+        description: 'macOS / 26 Intel - no end date yet'
+        type: boolean
+        default: false
+      macos_15_intel:
+        description: 'macOS / 15 Intel - no end date yet'
+        type: boolean
+        default: false
+      run_desktop:
+        description: 'EXPERIMENTAL - Windows and macOS: try to move the desktop to the run account and start RustDesk there'
+        type: boolean
+        default: false
 permissions: {}
 jobs:
-  pick:
+  select-os:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      nodes: ${{ steps.pick.outputs.nodes }}
-      images: ${{ steps.pick.outputs.images }}
+      linux: ${{ steps.pick.outputs.linux }}
+      windows: ${{ steps.pick.outputs.windows }}
+      macos: ${{ steps.pick.outputs.macos }}
     steps:
       - id: pick
-        shell: python
         env:
-          WORKERS: ${{ inputs.workers }}
-          TOTAL: ${{ inputs.total }}
-          JOIN: ${{ inputs.join }}
-          CLUSTER: ${{ inputs.cluster }}
-          WINDOWS: ${{ inputs.windows }}
+          INPUTS: ${{ toJSON(inputs) }}
         run: |
-          import json, os, re, sys
-          workers, total, join = int(os.environ["WORKERS"]), int(os.environ["TOTAL"]), os.environ["JOIN"] == "true"
-          problem = ""
-          if not re.fullmatch("[a-z0-9]{1,16}", os.environ["CLUSTER"]):
-              problem = "The cluster name can only use lowercase letters and digits, up to 16 characters"
-          elif total and total < workers and not join:
-              problem = f"total ({total}) is smaller than workers ({workers}), use 0 or at least {workers}"
-          if problem:
-              print("::error::" + problem)
-              sys.exit(1)
-          nodes = list(range(1 if join else 0, workers + 1))
-          images = ["windows-2022", "windows-2025"] if os.environ["WINDOWS"] == "auto" else [os.environ["WINDOWS"]]
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write("nodes=" + json.dumps(nodes) + "\n")
-              f.write("images=" + json.dumps(images) + "\n")
-  node:
-    needs: pick
-    name: ${{ matrix.node == 0 && 'head' || format('worker {0}', matrix.node) }} on ${{ matrix.image }}
+          python3 - << 'PY'
+          import json, os
+          labels = {
+              "ubuntu_latest": "ubuntu-latest",
+              "ubuntu_24_04": "ubuntu-24.04",
+              "ubuntu_22_04": "ubuntu-22.04",
+              "ubuntu_26_04": "ubuntu-26.04",
+              "ubuntu_24_04_arm": "ubuntu-24.04-arm",
+              "ubuntu_22_04_arm": "ubuntu-22.04-arm",
+              "ubuntu_26_04_arm": "ubuntu-26.04-arm",
+              "windows_latest": "windows-latest",
+              "windows_2025": "windows-2025",
+              "windows_2022": "windows-2022",
+              "windows_11_arm": "windows-11-arm",
+              "macos_latest": "macos-latest",
+              "macos_26": "macos-26",
+              "macos_15": "macos-15",
+              "macos_14": "macos-14",
+              "macos_26_intel": "macos-26-intel",
+              "macos_15_intel": "macos-15-intel",
+          }
+          ticked = json.loads(os.environ["INPUTS"])
+          picked = [labels[k] for k, v in ticked.items() if k in labels and v in (True, "true")] or ["ubuntu-24.04"]
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              for output, prefix in (("linux", "ubuntu"), ("windows", "windows"), ("macos", "macos")):
+                  out.write(output + "=" + json.dumps([x for x in picked if x.startswith(prefix)]) + "\n")
+          PY
+  linux:
+    needs: select-os
+    if: needs.select-os.outputs.linux != '[]'
+    name: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        node: ${{ fromJSON(needs.pick.outputs.nodes) }}
-        image: ${{ fromJSON(needs.pick.outputs.images) }}
-    runs-on: ${{ matrix.image }}
+        os: ${{ fromJSON(needs.select-os.outputs.linux) }}
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 360
-    permissions:
-      actions: read
-    defaults:
-      run:
-        shell: python
     env:
-      NODE: ${{ matrix.node }}
-      LABEL: ${{ matrix.image }}
-      LABELS: ${{ needs.pick.outputs.images }}
-      WORKERS: ${{ inputs.workers }}
-      TOTAL: ${{ inputs.total }}
-      CLUSTER: ${{ inputs.cluster }}
-      SOURCE: ${{ inputs.source }}
-      MODEL: ${{ inputs.model }}
-      MINUTES: ${{ inputs.minutes }}
-      GH_TOKEN: ${{ github.token }}
+      OS_LABEL: ${{ matrix.os }}
+      RUN_PASSWORD: ${{ secrets.RUN_PASSWORD }}
       TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
       TS_OAUTH_CLIENT_SECRET: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
     steps:
-      - name: cluster
+      - name: build
+        shell: bash
         run: |
-          import calendar, concurrent.futures, ctypes, errno, json, os, platform, re, shutil, socket, socketserver, subprocess, sys, tempfile, threading, time, urllib.error, urllib.parse, urllib.request, zipfile
-          sys.stdout.reconfigure(line_buffering=True, errors="replace")
-          T0 = time.time()
-          CID, CSEC, GHT = (os.environ.pop(k, "") for k in ("TS_OAUTH_CLIENT_ID", "TS_OAUTH_CLIENT_SECRET", "GH_TOKEN"))
-          NODE, WORKERS, TOTAL, MINUTES = (int(os.environ[k]) for k in ("NODE", "WORKERS", "TOTAL", "MINUTES"))
-          MODEL, CLUSTER, LABEL = (os.environ[k] for k in ("MODEL", "CLUSTER", "LABEL"))
-          LABELS = json.loads(os.environ["LABELS"])
-          SOURCE = os.environ["SOURCE"]
-          HEAD = NODE == 0
-          WANT = TOTAL or WORKERS
-          LIMIT = 350 * 60
-          GRACE = 30
-          TAG = "b11612"
-          ALLOW = "100.64.0.0/10"
-          CTLS = [5201, 15201, 25201, 35201, 45201]
-          RPCS = [15052, 25052, 35052, 45052, 5052]
-          APIS = [8080, 18080, 28080, 38080, 48080]
-          MODELS = {
-              "qwen3-30b-a3b": ("https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf", 18556685824),
-              "gpt-oss-120b": ("https://huggingface.co/ggml-org/gpt-oss-120b-GGUF/resolve/main/gpt-oss-120b-MXFP4.gguf", 63387346208),
+          if [ "${#RUN_PASSWORD}" -lt 12 ]; then echo "::error::RUN_PASSWORD must be set and at least 12 characters"; exit 1; fi
+          RD_TAG=$(curl -fsSIL -o /dev/null -w '%{url_effective}' https://github.com/rustdesk/rustdesk/releases/latest || true)
+          RD_TAG=${RD_TAG##*/}
+          case "$RD_TAG" in [0-9]*.[0-9]*.[0-9]*) ;; *) RD_TAG=1.5.0 ;; esac
+          curl -fsSL -o /tmp/rustdesk.deb "https://github.com/rustdesk/rustdesk/releases/download/$RD_TAG/rustdesk-$RD_TAG-$(uname -m).deb" \
+            || { echo "::error::Could not download RustDesk $RD_TAG"; exit 1; }
+          sudo ufw allow from 100.64.0.0/10 to any port 21118 proto tcp
+          sudo ufw --force enable
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=3 install -y --no-install-recommends cinnamon gnome-terminal xvfb libgl1-mesa-dri librsvg2-common adwaita-icon-theme dbus dbus-x11 dbus-user-session /tmp/rustdesk.deb
+          sudo systemctl disable --now rustdesk || true
+          sudo useradd -m -s /bin/bash run
+          printf '%s\n' "run:$RUN_PASSWORD" | sudo chpasswd
+          sudo usermod -aG sudo run
+          sudo install -d -m 1777 /tmp/.X11-unix
+          sudo install -d -o run -g run -m 700 /tmp/xdg-run
+          UENV=(HOME=/home/run USER=run LOGNAME=run SHELL=/bin/bash LANG=C.UTF-8 PATH="$PATH" XDG_RUNTIME_DIR=/tmp/xdg-run XDG_SESSION_TYPE=x11 DISPLAY=:99)
+          sudo -u run env -i "${UENV[@]}" Xvfb :99 -screen 0 1280x720x24 -nolisten tcp > /tmp/xvfb.log 2>&1 &
+          for i in $(seq 1 30); do if [ -S /tmp/.X11-unix/X99 ]; then break; fi; sleep 1; done
+          if [ ! -S /tmp/.X11-unix/X99 ]; then echo "::error::Xvfb did not start"; cat /tmp/xvfb.log; exit 1; fi
+          DBUS=$(sudo -u run env -i "${UENV[@]}" dbus-daemon --session --fork --print-address)
+          if [ -z "$DBUS" ]; then echo "::error::D-Bus session did not start"; exit 1; fi
+          UENV+=(DBUS_SESSION_BUS_ADDRESS="$DBUS")
+          sudo -u run env -i "${UENV[@]}" cinnamon-session-cinnamon > /tmp/cinnamon.log 2>&1 &
+          DESKTOP_UP=no
+          for i in $(seq 1 60); do if [ "$(sudo -u run env -i "${UENV[@]}" gdbus call --session --dest org.Cinnamon --object-path /org/Cinnamon --method org.Cinnamon.GetRunState 2>/dev/null || true)" = "(2,)" ]; then DESKTOP_UP=yes; break; fi; sleep 3; done
+          if [ "$DESKTOP_UP" != yes ]; then echo "::error::Cinnamon did not start"; tail -n 40 /tmp/cinnamon.log; exit 1; fi
+          sudo -u run env -i "${UENV[@]}" rustdesk --server > /tmp/rustdesk.log 2>&1 &
+          NODE="gh-${OS_LABEL//./-}-$GITHUB_RUN_ID"
+          ACCESS_TOKEN=$(printf 'data = "client_id=%s&client_secret=%s"\n' "$TS_OAUTH_CLIENT_ID" "$TS_OAUTH_CLIENT_SECRET" \
+            | curl -fsS -K - "https://api.tailscale.com/api/v2/oauth/token" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])") \
+            || { echo "::error::Tailscale OAuth token request failed"; exit 1; }
+          echo "::add-mask::$ACCESS_TOKEN"
+          TS_KEY=$(printf 'header = "Authorization: Bearer %s"\n' "$ACCESS_TOKEN" \
+            | curl -fsS -K - -H "Content-Type: application/json" \
+              -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:ci"]}}},"expirySeconds":600}' \
+              "https://api.tailscale.com/api/v2/tailnet/-/keys" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['key'])") \
+            || { echo "::error::Tailscale auth key request failed - check the OAuth client scope and tag:ci"; exit 1; }
+          echo "::add-mask::$TS_KEY"
+          curl -fsSL -o "$RUNNER_TEMP/tailscale-install.sh" https://tailscale.com/install.sh
+          sh "$RUNNER_TEMP/tailscale-install.sh"
+          sudo tailscale up --authkey="$TS_KEY" --hostname="$NODE" --timeout=120s
+          TS_IP=$(tailscale ip -4 2>/dev/null || true)
+          if [ -z "$TS_IP" ]; then echo "::error::Tailscale IP not assigned"; exit 1; fi
+          for i in $(seq 1 60); do
+            RD_OUT=$(sudo rustdesk --password "$RUN_PASSWORD" 2>&1 || true)
+            case "$RD_OUT" in *Done!*) break ;; esac
+            sleep 3
+          done
+          case "$RD_OUT" in *Done!*) ;; *) echo "::error::RustDesk did not accept the password: $RD_OUT"; tail -n 40 /tmp/rustdesk.log; exit 1 ;; esac
+          sudo rustdesk --option direct-server Y
+          sudo rustdesk --option whitelist 100.64.0.0/10
+          sudo rustdesk --option verification-method use-permanent-password
+          sudo rustdesk --option approve-mode password
+          sudo rustdesk --option av1-test N
+          RD_UP=no
+          for i in $(seq 1 30); do if timeout 5 bash -c "cat < /dev/null > /dev/tcp/$TS_IP/21118" 2>/dev/null; then RD_UP=yes; break; fi; sleep 2; done
+          if [ "$RD_UP" != yes ]; then echo "::error::RustDesk port 21118 not reachable"; tail -n 40 /tmp/rustdesk.log; exit 1; fi
+          echo "TCP OK"
+          echo "=== READY ==="
+          exec env -i PATH="$PATH" HOME="$HOME" bash -c 'while true; do echo "[$(date)] Active"; sleep 300; done'
+  windows:
+    needs: select-os
+    if: needs.select-os.outputs.windows != '[]'
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.select-os.outputs.windows) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    env:
+      OS_LABEL: ${{ matrix.os }}
+      RUN_DESKTOP: ${{ inputs.run_desktop }}
+      RUN_PASSWORD: ${{ secrets.RUN_PASSWORD }}
+      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+      TS_OAUTH_CLIENT_SECRET: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
+    steps:
+      - name: build
+        run: |
+          if ([string]::IsNullOrEmpty($env:RUN_PASSWORD) -or $env:RUN_PASSWORD.Length -lt 12) { Write-Error "RUN_PASSWORD must be set and at least 12 characters"; exit 1 }
+          netsh advfirewall firewall delete rule name="RDP-Tailscale" | Out-Null
+          netsh advfirewall firewall add rule name="RDP-Tailscale" dir=in action=allow protocol=TCP localport=3389 remoteip=100.64.0.0/10
+          Disable-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "SecurityLayer" -Value 2 -Force
+          Restart-Service -Name TermService -Force
+          $securePass = ConvertTo-SecureString $env:RUN_PASSWORD -AsPlainText -Force
+          New-LocalUser -Name "run" -Password $securePass -AccountNeverExpires
+          Add-LocalGroupMember -Group "Administrators" -Member "run"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "run"
+          $arch = if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString() -eq 'Arm64') { 'arm64' } else { 'amd64' }
+          $rdTag = '1.5.0'
+          try {
+            $rdFinal = (Invoke-WebRequest -Uri 'https://github.com/rustdesk/rustdesk/releases/latest' -Method Head -UseBasicParsing).BaseResponse.RequestMessage.RequestUri.AbsoluteUri.TrimEnd('/').Split('/')[-1]
+            if ($rdFinal -match '^\d+\.\d+\.\d+$') { $rdTag = $rdFinal }
+          } catch {}
+          $rdArch = if ($arch -eq 'arm64') { 'aarch64' } else { 'x86_64' }
+          $rdSetup = "$env:TEMP\rustdesk-setup.exe"
+          Invoke-WebRequest -Uri "https://github.com/rustdesk/rustdesk/releases/download/$rdTag/rustdesk-$rdTag-$rdArch.exe" -OutFile $rdSetup
+          Start-Process -FilePath $rdSetup -ArgumentList '--silent-install'
+          $msi = "$env:TEMP\tailscale.msi"
+          try {
+            Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-latest-$arch.msi" -OutFile $msi
+          } catch {
+            $page = (Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/" -UseBasicParsing).Content
+            $ver = [regex]::Match($page, "tailscale-setup-([0-9.]+)-$arch\.msi").Groups[1].Value
+            if (-not $ver) { Write-Error "Could not resolve Tailscale installer"; exit 1 }
+            Invoke-WebRequest -Uri "https://pkgs.tailscale.com/stable/tailscale-setup-$ver-$arch.msi" -OutFile $msi
           }
-          URL, SIZE = MODELS[MODEL]
-          WORK = os.environ["RUNNER_TEMP"]
-          TMP = tempfile.gettempdir()
-          BIN = os.path.join(WORK, "llama")
-          RUN = os.environ["GITHUB_RUN_ID"] + "-" + os.environ["GITHUB_RUN_ATTEMPT"]
-          ROLE = "head" if HEAD else f"worker {NODE}"
-          HOST = f"{CLUSTER}-head-{RUN}" if HEAD else f"{CLUSTER}-w-{RUN}-{NODE}"
-          STOP = threading.Event()
-          SEEN = [0.0]
-          CLAIMED = [""]
-          WIPS = []
-          NAME = {}
-          BUSY = set()
-          PORT = {}
-          RP = 0
-          def fail(msg):
-              print("::error::" + msg)
-              sys.exit(1)
-          def say(msg):
-              print(time.strftime("[%H:%M:%S] ") + msg)
-          def gb(n):
-              return f"{n / 1e9:.1f} GB"
-          def get(*cmd, **kw):
-              try:
-                  return subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=90, **kw).stdout.strip()
-              except subprocess.TimeoutExpired:
-                  return ""
-          def run(*cmd, **kw):
-              kw.setdefault("check", True)
-              return subprocess.run(cmd, **kw)
-          def wait(test, secs, what, why=lambda: ""):
-              end = time.time() + secs
-              while True:
-                  value = test()
-                  if value:
-                      return value
-                  if time.time() > end:
-                      fail("Timed out waiting for " + what + why())
-                  time.sleep(3)
-          def fetch(url, path, size=0):
-              for attempt in range(8):
-                  have = os.path.getsize(path) if size and os.path.exists(path) else 0
-                  if size and have == size:
-                      return True
-                  try:
-                      req = urllib.request.Request(url, headers={"Range": f"bytes={have}-"} if have else {})
-                      with urllib.request.urlopen(req, timeout=60) as r, open(path, "ab" if have and r.status == 206 else "wb") as f:
-                          last = time.time()
-                          while True:
-                              chunk = r.read(1 << 22)
-                              if not chunk:
-                                  break
-                              f.write(chunk)
-                              if size and time.time() - last > 60:
-                                  last = time.time()
-                                  say(f"downloading {os.path.basename(path)}: {gb(f.tell())} of {gb(size)}")
-                      if not size or os.path.getsize(path) == size:
-                          return True
-                  except Exception as e:
-                      print(f"Download failed: {url} ({e})")
-                  time.sleep(5)
-              return False
-          def api(path, data, headers):
-              try:
-                  with urllib.request.urlopen(urllib.request.Request("https://api.tailscale.com/api/v2/" + path, data=data, headers=headers), timeout=30) as r:
-                      return json.load(r)
-              except urllib.error.HTTPError as e:
-                  fail(f"Tailscale API {path} returned {e.code}: {e.read().decode()[:300]}")
-              except Exception as e:
-                  fail(f"Tailscale API {path} failed: {e}")
-          def taken(ip, port):
-              s = socket.socket()
-              try:
-                  s.bind((ip, port))
-                  return False
-              except OSError as e:
-                  return e.errno == errno.EADDRINUSE or getattr(e, "winerror", 0) == 10048
-              finally:
-                  s.close()
-          def pick(ports):
-              for p in ports:
-                  if taken(IP, p):
-                      say(f"port {p} is already in use")
-                      continue
-                  s = socket.socket()
-                  try:
-                      s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                      s.bind((IP, p))
-                      s.listen(1)
-                      return p
-                  except OSError as e:
-                      say(f"port {p} is not usable here: {e}")
-                  finally:
-                      s.close()
-              return 0
-          def find(ip):
-              for p in CTLS:
-                  PORT[ip] = p
-                  try:
-                      if ask(ip, b"PING", 3) == "PONG":
-                          return True
-                  except OSError:
-                      pass
-              return False
-          def start_rpc(host):
-              for port in RPCS:
-                  proc = subprocess.Popen([os.path.join(BIN, "ggml-rpc-server.exe"), "-H", host, "-p", str(port)], cwd=BIN)
-                  began = time.time()
-                  wait(lambda: proc.poll() is not None or taken(host, port) or time.time() - began > 15, 60, "the RPC server to start")
-                  if proc.poll() is None:
-                      return proc, port
-                  say(f"The RPC server stopped with code {proc.returncode} on port {port}, trying the next port")
-              fail("The RPC server could not start on any port, see the lines above")
-          class MemStatus(ctypes.Structure):
-              _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong)] + [(n, ctypes.c_ulonglong) for n in ("total", "avail", "pf_total", "pf_avail", "v_total", "v_avail", "v_ext")]
-          def ram():
-              m = MemStatus()
-              m.length = ctypes.sizeof(m)
-              ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
-              return m.avail, m.total
-          def ts(*args):
-              return get(*TS, *args)
-          def ask(ip, line, timeout=30):
-              with socket.create_connection((ip, PORT[ip]), timeout=timeout) as s:
-                  s.sendall(line + b"\n")
-                  return s.makefile("rb").readline().decode().strip()
-          class Ctl(socketserver.StreamRequestHandler):
-              disable_nagle_algorithm = True
-              def handle(self):
-                  while True:
-                      parts = self.rfile.readline().split()
-                      if not parts:
-                          return
-                      SEEN[0] = time.time()
-                      if parts[0] == b"PING":
-                          self.wfile.write(b"PONG\n")
-                      elif parts[0] == b"CLAIM":
-                          who = b" ".join(parts[1:]).decode()
-                          if CLAIMED[0] in ("", who):
-                              CLAIMED[0] == who or say("claimed by " + who)
-                              CLAIMED[0] = who
-                              self.wfile.write(b"OK\n")
-                          else:
-                              self.wfile.write(b"BUSY\n")
-                      elif parts[0] == b"LEFT":
-                          self.wfile.write(f"{int(T0 + LIMIT - time.time())}\n".encode())
-                      elif parts[0] == b"MEM":
-                          self.wfile.write(f"{ram()[0]}\n".encode())
-                      elif parts[0] == b"RPC":
-                          self.wfile.write(f"{RP}\n".encode())
-                      elif parts[0] == b"SINK":
-                          while self.rfile.read(1 << 20):
-                              pass
-                          self.wfile.write(b"OK\n")
-                      elif parts[0] == b"QUIT":
-                          self.wfile.write(b"BYE\n")
-                          STOP.set()
-                          return
-          class Server(socketserver.ThreadingTCPServer):
-              allow_reuse_address = True
-              daemon_threads = True
-          def latency(ip, n=200):
-              with socket.create_connection((ip, PORT[ip]), timeout=30) as s:
-                  s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                  f = s.makefile("rb")
-                  ms = []
-                  for _ in range(n):
-                      t = time.perf_counter()
-                      s.sendall(b"PING\n")
-                      f.readline()
-                      ms.append((time.perf_counter() - t) * 1000)
-              ms.sort()
-              return ms[0], ms[n // 2], ms[int(n * 0.95)]
-          def upload(ip, secs=10):
-              block = bytes(1 << 20)
-              with socket.create_connection((ip, PORT[ip]), timeout=120) as s:
-                  s.sendall(b"SINK\n")
-                  t = time.perf_counter()
-                  mb = 0
-                  while time.perf_counter() - t < secs and mb < 512:
-                      s.sendall(block)
-                      mb += 1
-                  s.shutdown(socket.SHUT_WR)
-                  s.makefile("rb").readline()
-                  return mb * 8.388608 / (time.perf_counter() - t)
-          def chat(prompt, tokens):
-              body = json.dumps({"messages": [{"role": "user", "content": prompt}], "max_tokens": tokens, "temperature": 0, "cache_prompt": False}).encode()
-              with urllib.request.urlopen(urllib.request.Request(f"http://{IP}:{AP}/v1/chat/completions", data=body, headers={"Content-Type": "application/json"}), timeout=1800) as r:
-                  return json.load(r)
-          def healthy():
-              try:
-                  with urllib.request.urlopen(f"http://{IP}:{AP}/health", timeout=5) as r:
-                      return r.status == 200
-              except Exception:
-                  return False
-          def memory_line():
-              parts = [gb(ram()[0])]
-              for ip in WIPS:
-                  try:
-                      parts.append(gb(int(ask(ip, b"MEM", 10))))
-                  except Exception:
-                      parts.append("?")
-              return "free RAM (head, workers): " + ", ".join(parts)
-          def peers():
-              try:
-                  found = json.loads(ts("status", "--json")).get("Peer") or {}
-              except ValueError:
-                  return {}
-              out = {}
-              for p in found.values():
-                  v4 = [a for a in p.get("TailscaleIPs") or [] if "." in a]
-                  if p.get("Online") and v4 and p.get("HostName", "").startswith(CLUSTER + "-w-"):
-                      out[p["HostName"]] = v4[0]
-              return out
-          def beaten():
-              if len(LABELS) < 2:
-                  return False
-              other = [x for x in LABELS if x != LABEL][0]
-              time.sleep(8 + GRACE * LABELS.index(LABEL))
-              try:
-                  url = f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/runs/{os.environ['GITHUB_RUN_ID']}/attempts/{os.environ['GITHUB_RUN_ATTEMPT']}/jobs?per_page=100"
-                  with urllib.request.urlopen(urllib.request.Request(url, headers={"Authorization": "Bearer " + GHT, "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}), timeout=30) as r:
-                      jobs = {j["name"]: j for j in json.load(r)["jobs"]}
-                  mine, twin = jobs[f"{ROLE} on {LABEL}"], jobs[f"{ROLE} on {other}"]
-              except Exception as e:
-                  say(f"Could not read the job list from GitHub ({e}), so this node may run on both Windows versions")
-                  return False
-              when = lambda j, label: (calendar.timegm(time.strptime(j["started_at"], "%Y-%m-%dT%H:%M:%SZ")) + GRACE * LABELS.index(label), LABELS.index(label))
-              return twin["status"] == "in_progress" and when(twin, other) < when(mine, LABEL)
-          if beaten():
-              say(f"{ROLE} already runs on the other Windows version, so this {LABEL} runner stops here")
-              sys.exit(0)
-          if len(CID) < 4 or len(CSEC) < 4:
-              fail("Set the secrets TS_OAUTH_CLIENT_ID and TS_OAUTH_CLIENT_SECRET")
-          avail, total = ram()
-          print(f"This runner: {ROLE} on {LABEL} ({platform.system()} {platform.release()} {platform.version()}), {os.cpu_count()} CPUs, RAM {gb(total)} ({gb(avail)} free), {WORK[:2]} drive {gb(shutil.disk_usage(WORK).free)} free, C: drive {gb(shutil.disk_usage('C:/').free)} free")
-          if HEAD:
-              print(f"PLAN  {MODEL} ({gb(SIZE)}) on 1 head + {WANT} workers ({WORKERS} from this run) in cluster {CLUSTER}, llama.cpp {TAG} built from source, stays up {MINUTES} min once ready")
-          src_zip = os.path.join(WORK, "source.zip")
-          fetch(SOURCE, src_zip) or fail("Could not download the llama.cpp source zip from " + SOURCE)
-          src_dir = os.path.join(WORK, "source")
-          with zipfile.ZipFile(src_zip) as z:
-              z.extractall(src_dir)
-          src = [os.path.join(src_dir, d) for d in os.listdir(src_dir) if os.path.exists(os.path.join(src_dir, d, "CMakeLists.txt"))][:1] or fail("The source zip has no folder with a CMakeLists.txt in it")
-          src = src[0]
-          for rel, pat, rep in (("ggml/src/ggml-backend.cpp", r"(#define GGML_SCHED_MAX_BACKENDS )16\b", r"\g<1>32"), ("src/llama.cpp", r"(size_t llama_max_devices\(void\) \{\s*return )16;", r"\g<1>32;")):
-              path = os.path.join(src, rel)
-              text, n = re.subn(pat, rep, open(path, encoding="utf-8").read())
-              n == 1 or fail(f"{rel} has the device limit {n} times, expected once")
-              open(path, "w", encoding="utf-8", newline="\n").write(text)
-          targets = ["llama-server", "ggml-rpc-server"] if HEAD else ["ggml-rpc-server"]
-          exes = [t + ".exe" for t in targets]
-          build = os.path.join(src, "build")
-          say("building " + " and ".join(targets) + " from " + SOURCE)
-          t0 = time.time()
-          run("cmake", "-S", src, "-B", build, "-DCMAKE_BUILD_TYPE=Release", "-DBUILD_SHARED_LIBS=OFF", "-DGGML_RPC=ON", "-DLLAMA_OPENSSL=OFF", "-DLLAMA_BUILD_TESTS=OFF", "-DLLAMA_BUILD_EXAMPLES=OFF", "-DLLAMA_BUILD_NUMBER=" + TAG[1:], check=False).returncode == 0 or fail("cmake could not set up the llama.cpp build, see the lines above")
-          run("cmake", "--build", build, "--config", "Release", "--parallel", "--target", *targets, check=False).returncode == 0 or fail("The llama.cpp build failed, see the lines above")
-          os.makedirs(BIN, exist_ok=True)
-          for exe in exes:
-              hits = [os.path.join(d, exe) for d, _, names in os.walk(build) if exe in names]
-              hits or fail(exe + " was not built")
-              shutil.copy(hits[0], BIN)
-          say("built " + " and ".join(exes) + " in " + str(round((time.time() - t0) / 60, 1)) + " min")
-          msi = os.path.join(TMP, "tailscale.msi")
-          fetch("https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi", msi) or fail("Could not download Tailscale")
-          sig = get("powershell", "-NoProfile", "-Command", f"$s = Get-AuthenticodeSignature '{msi}'; $s.Status; $s.SignerCertificate.Subject")
-          if not sig.startswith("Valid") or "Tailscale" not in sig:
-              fail("Tailscale installer signature check failed: " + sig)
-          if run("msiexec", "/i", msi, "/quiet", "/norestart", check=False).returncode not in (0, 3010):
-              fail("Tailscale installation failed")
-          run("powershell", "-NoProfile", "-Command", "Start-Service Tailscale", check=False)
-          TS = [p for p in (os.path.join(d, "Tailscale", "tailscale.exe") for d in (os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432"), os.environ.get("ProgramFiles(x86)")) if d) if os.path.exists(p)][:1] or fail("tailscale.exe not found")
-          token = api("oauth/token", urllib.parse.urlencode({"client_id": CID, "client_secret": CSEC}).encode(), {})["access_token"]
-          print("::add-mask::" + token)
-          key = api("tailnet/-/keys", json.dumps({"capabilities": {"devices": {"create": {"reusable": False, "ephemeral": True, "preauthorized": True, "tags": ["tag:ci"]}}}, "expirySeconds": 600}).encode(), {"Authorization": "Bearer " + token, "Content-Type": "application/json"})["key"]
-          print("::add-mask::" + key)
-          run(*TS, "up", "--authkey=" + key, "--hostname=" + HOST, "--timeout=120s", "--unattended")
-          wait(lambda: ts("ip", "-4"), 90, "a Tailscale address")
-          IP = ts("ip", "-4").splitlines()[0]
-          print(f"Tailscale address {IP} as {HOST}")
-          print(ts("netcheck"))
-          print(get("netsh", "int", "ipv4", "show", "excludedportrange", "protocol=tcp"))
-          print(get("netsh", "advfirewall", "firewall", "add", "rule", "name=llm-cluster", "dir=in", "action=allow", "protocol=TCP", "localport=" + ",".join(str(p) for p in CTLS + RPCS + APIS), "remoteip=" + ALLOW))
-          if not HEAD:
-              rpc = None
-              try:
-                  rpc, RP = start_rpc(IP)
-                  for CP in CTLS:
-                      try:
-                          ctl = Server((IP, CP), Ctl)
-                          break
-                      except OSError as e:
-                          say(f"port {CP} is not usable here: {e}")
-                  else:
-                      fail("No usable control port")
-                  threading.Thread(target=ctl.serve_forever, daemon=True).start()
-                  say(f"READY as a worker of cluster {CLUSTER}, RPC port {RP}, control port {CP}, waiting for the head")
-                  started = time.time()
-                  while not STOP.is_set():
-                      rpc.poll() is None or fail(f"The RPC server stopped with code {rpc.returncode}, free RAM {gb(ram()[0])}")
-                      quiet = time.time() - (SEEN[0] or started)
-                      quiet < (15 if SEEN[0] else 40) * 60 or fail(f"The head has been silent for {quiet / 60:.0f} min, shutting down")
-                      say(f"worker alive, free RAM {gb(ram()[0])}")
-                      STOP.wait(60)
-                  print("The head is finished, shutting down")
-              finally:
-                  if rpc is not None:
-                      rpc.terminate()
-              sys.exit(0)
-          srv = local = None
-          try:
-              local, LP = start_rpc("127.0.0.1")
-              me = b"CLAIM " + HOST.encode()
-              def pulse():
-                  while True:
-                      time.sleep(30)
-                      for ip in list(WIPS):
-                          try:
-                              ask(ip, me, 10)
-                          except Exception:
-                              pass
-              threading.Thread(target=pulse, daemon=True).start()
-              end = time.time() + 2400
-              shown = 0
-              with concurrent.futures.ThreadPoolExecutor(16) as pool:
-                  while len(WIPS) < WANT and time.time() < end:
-                      fresh = [c for c in sorted(peers().items()) if c[1] not in WIPS and c[1] not in BUSY]
-                      for (name, ip), up in zip(fresh, pool.map(lambda c: find(c[1]), fresh)):
-                          if up and len(WIPS) < WANT:
-                              try:
-                                  reply = ask(ip, me)
-                              except OSError:
-                                  continue
-                              if reply == "OK":
-                                  NAME[ip] = name
-                                  WIPS.append(ip)
-                                  say(f"worker {len(WIPS)} of {WANT} joined: {name} {ip}")
-                              else:
-                                  BUSY.add(ip)
-                                  say(f"{name} works for another head, skipping it")
-                      if len(WIPS) < WANT and time.time() - shown > 60:
-                          shown = time.time()
-                          say(f"waiting for workers of cluster {CLUSTER}: {len(WIPS)} of {WANT} joined, {len([c for c in fresh if c[1] not in WIPS])} more seen on Tailscale but not ready")
-                      len(WIPS) < WANT and time.sleep(5)
-              if len(WIPS) < WANT:
-                  print(ts("status"))
-                  WIPS or fail(f"No worker joined cluster {CLUSTER} in 40 minutes - check that the worker jobs use the same cluster name and the same Tailscale secrets, and that the Tailscale access rules let tag:ci reach tag:ci on all ports")
-                  say(f"Only {len(WIPS)} of {WANT} workers joined in 40 minutes, going on with those if the model fits")
-              DEAD = min([T0 + LIMIT] + [time.time() + int(ask(ip, b"LEFT", 10)) for ip in WIPS])
-              def probe(ip):
-                  return ts("ping", "--c", "5", NAME[ip]), latency(ip)
-              with concurrent.futures.ThreadPoolExecutor(len(WIPS)) as pool:
-                  probes = list(pool.map(probe, WIPS))
-              status = ts("status")
-              rates = []
-              for i, (ip, (pong, (lo, mid, hi))) in enumerate(zip(WIPS, probes), 1):
-                  print(pong)
-                  mbps = upload(ip, 10 if len(WIPS) <= 4 else 4)
-                  rates.append(mbps)
-                  print(f"NETWORK  worker {i} {NAME[ip]} {ip}: round trip {mid:.1f} ms (best {lo:.1f}, 95% under {hi:.1f}), upload {mbps:.0f} Mbps")
-                  print("  " + "\n  ".join(l.strip() for l in status.splitlines() if NAME[ip] in l))
-              push = SIZE * len(WIPS) / (len(WIPS) + 1) * 8 / (sum(rates) / len(rates) * 1e6)
-              print(f"Sending the model to the workers at this speed takes about {push / 60:.0f} min")
-              free = [ram()[0]] + [int(ask(ip, b"MEM")) for ip in WIPS]
-              print(f"MEMORY  model {gb(SIZE)}, free RAM per runner: {', '.join(gb(x) for x in free)}, total {gb(sum(free))}")
-              need = SIZE + 2e9 * len(free)
-              sum(free) > need or fail(f"The model needs about {gb(need)} of RAM on {len(free)} runners but they have {gb(sum(free))} free in total, " + (f"{WANT - len(WIPS)} workers did not join, " if len(WIPS) < WANT else "") + "add workers or pick a smaller model")
-              model = os.path.join(WORK, URL.rsplit("/", 1)[-1])
-              shutil.disk_usage(WORK).free > SIZE + 3e9 or fail("Not enough free disk space for the model on " + WORK[:2])
-              t0 = time.time()
-              fetch(URL, model, SIZE) or fail("Could not download the model")
-              say(f"model downloaded in {(time.time() - t0) / 60:.1f} min")
-              AP = wait(lambda: pick(APIS), 30, "a usable port for the web server")
-              srv = subprocess.Popen([os.path.join(BIN, "llama-server.exe"), "-m", model, "--rpc", ",".join([f"{ip}:{ask(ip, b'RPC')}" for ip in WIPS] + [f"127.0.0.1:{LP}"]), "--host", IP, "--port", str(AP), "-c", "8192", "-np", "1", "-cram", "0", "-ngl", "999", "-fit", "off", "-lv", "4"], cwd=BIN)
-              beat = [0.0]
-              def loaded():
-                  srv.poll() is None or fail(f"llama-server stopped with code {srv.returncode}, see the log lines above")
-                  if time.time() - beat[0] > 60:
-                      beat[0] = time.time()
-                      say("loading the model, " + memory_line())
-                  return healthy()
-              t0 = time.time()
-              wait(loaded, 7200, "the model to load")
-              say(f"model loaded in {(time.time() - t0) / 60:.1f} min")
-              for prompt, tokens in (("Say hello in five words.", 32), ("Summarize in one sentence: " + "The quick brown fox jumps over the lazy dog. " * 40, 48)):
-                  j = chat(prompt, tokens)
-                  t = j["timings"]
-                  m = j["choices"][0]["message"]
-                  print(f"SELFTEST  prompt {t['prompt_n']} tokens at {t['prompt_per_second']:.1f} tokens/s, answer {t['predicted_n']} tokens at {t['predicted_per_second']:.2f} tokens/s")
-                  print("  " + (m.get("content") or m.get("reasoning_content") or "")[:150].replace("\n", " "))
-              until = min(time.time() + MINUTES * 60, DEAD)
-              left = int((until - time.time()) / 60)
-              print("=" * 44)
-              print(f"READY  to chat, open this in a browser: http://{IP}:{AP}")
-              print("Turn on Tailscale on your PC first")
-              print(f"For other apps the OpenAI-style API base URL is http://{IP}:{AP}/v1 (it is not a web page)")
-              print(f"It stays up for {left} minutes" + (f" (less than the {MINUTES} you asked for, because GitHub stops a job after 6 hours)" if left < MINUTES - 1 else "") + ". To stop earlier, cancel the workflow run")
-              print("=" * 44)
-              while time.time() < until:
-                  srv.poll() is None or fail(f"llama-server stopped with code {srv.returncode}, see the log lines above")
-                  say(f"serving, {int((until - time.time()) / 60)} min left, " + memory_line())
-                  time.sleep(min(60, max(1, until - time.time())))
-              print("Time is up")
-          finally:
-              if srv is not None:
-                  srv.terminate()
-                  try:
-                      srv.wait(30)
-                  except subprocess.TimeoutExpired:
-                      srv.kill()
-              if local is not None:
-                  local.terminate()
-              for ip in WIPS:
-                  try:
-                      ask(ip, b"QUIT", 10)
-                  except Exception:
-                      pass
+          $sig = Get-AuthenticodeSignature $msi
+          if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'Tailscale') { Write-Error "Tailscale installer signature check failed: $($sig.Status)"; exit 1 }
+          $p = Start-Process msiexec.exe -ArgumentList "/i", "`"$msi`"", "/quiet", "/norestart" -Wait -PassThru
+          if ($p.ExitCode -notin @(0, 3010)) { Write-Error "Tailscale install failed: exit code $($p.ExitCode)"; exit 1 }
+          Remove-Item $msi -Force
+          Start-Service Tailscale -ErrorAction SilentlyContinue
+          $ts = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432) | Where-Object { $_ } | ForEach-Object { Join-Path $_ 'Tailscale\tailscale.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $ts) { Write-Error "tailscale.exe not found"; exit 1 }
+          $tokenBody = "client_id=$([uri]::EscapeDataString($env:TS_OAUTH_CLIENT_ID))&client_secret=$([uri]::EscapeDataString($env:TS_OAUTH_CLIENT_SECRET))"
+          $tokenResp = Invoke-RestMethod -Method Post -Uri "https://api.tailscale.com/api/v2/oauth/token" -ContentType "application/x-www-form-urlencoded" -Body $tokenBody
+          Write-Host "::add-mask::$($tokenResp.access_token)"
+          $keyBody = @{ capabilities = @{ devices = @{ create = @{ reusable = $false; ephemeral = $true; preauthorized = $true; tags = @("tag:ci") } } }; expirySeconds = 600 } | ConvertTo-Json -Depth 5
+          $keyResp = Invoke-RestMethod -Method Post -Uri "https://api.tailscale.com/api/v2/tailnet/-/keys" -Headers @{ Authorization = "Bearer $($tokenResp.access_token)" } -ContentType "application/json" -Body $keyBody
+          Write-Host "::add-mask::$($keyResp.key)"
+          $tsName = "gh-$($env:OS_LABEL.Replace('.', '-'))-$env:GITHUB_RUN_ID"
+          & $ts up --authkey=$($keyResp.key) --hostname=$tsName --unattended --timeout=120s
+          $tsIP = $null; $retries = 0
+          while (-not $tsIP -and $retries -lt 12) { $tsIP = & $ts ip -4; Start-Sleep -Seconds 5; $retries++ }
+          if (-not $tsIP) { & $ts status; Get-Service Tailscale -ErrorAction SilentlyContinue | Out-Host; Write-Error "Tailscale IP not assigned"; exit 1 }
+          $test = Test-NetConnection -ComputerName $tsIP -Port 3389
+          if (-not $test.TcpTestSucceeded) { Write-Error "Port not reachable"; exit 1 }
+          $rd = Join-Path $(if ($env:ProgramW6432) { $env:ProgramW6432 } else { $env:ProgramFiles }) 'RustDesk\rustdesk.exe'
+          $rdEnd = (Get-Date).AddMinutes(5)
+          while (-not (Test-Path $rd)) { if ((Get-Date) -gt $rdEnd) { Write-Error "RustDesk did not finish installing"; exit 1 }; Start-Sleep -Seconds 3 }
+          $rdEnd = (Get-Date).AddMinutes(5)
+          while ($true) {
+            $rdOut = (& $rd --password $env:RUN_PASSWORD | Out-String)
+            if ($rdOut -match 'Done!') { break }
+            if ((Get-Date) -gt $rdEnd) { Write-Error "RustDesk did not accept the password: $rdOut"; exit 1 }
+            Start-Sleep -Seconds 3
+          }
+          & $rd --option direct-server Y | Out-Null
+          & $rd --option whitelist 100.64.0.0/10 | Out-Null
+          & $rd --option verification-method use-permanent-password | Out-Null
+          & $rd --option approve-mode password | Out-Null
+          & $rd --option av1-test N | Out-Null
+          netsh advfirewall firewall delete rule name="RustDesk-Tailscale" | Out-Null
+          netsh advfirewall firewall add rule name="RustDesk-Tailscale" dir=in action=allow protocol=TCP localport=21118 remoteip=100.64.0.0/10
+          netsh advfirewall firewall set rule name="RustDesk Service" dir=in new remoteip=100.64.0.0/10
+          $rdEnd = (Get-Date).AddMinutes(2)
+          while (-not (Test-NetConnection -ComputerName $tsIP -Port 21118 -InformationLevel Quiet -WarningAction SilentlyContinue)) { if ((Get-Date) -gt $rdEnd) { Write-Error "RustDesk port 21118 not reachable"; exit 1 }; Start-Sleep -Seconds 3 }
+          Write-Host "=== READY ==="
+          if ($env:RUN_DESKTOP -eq 'true') {
+            $jobSid = (Get-Process -Id $PID).SessionId
+            $q = (qwinsta | Out-String)
+            Write-Host "::notice title=Move desktop to run::this job runs in session $jobSid. Sessions now:`n$q"
+            $consoleSid = $null
+            foreach ($line in ($q -split "`r?`n")) { if ($line -match '^\s*>?console\s+(?:\S+\s+)?(\d+)\s+\w+') { $consoleSid = [int]$Matches[1] } }
+            $wl = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+            Set-ItemProperty -Path $wl -Name AutoAdminLogon -Value '1'
+            Set-ItemProperty -Path $wl -Name ForceAutoLogon -Value '1'
+            Set-ItemProperty -Path $wl -Name DefaultUserName -Value 'run'
+            Set-ItemProperty -Path $wl -Name DefaultDomainName -Value $env:COMPUTERNAME
+            Set-ItemProperty -Path $wl -Name DefaultPassword -Value $env:RUN_PASSWORD
+            if ($null -eq $consoleSid) { Write-Host "::warning::Console session not found, not switching" } elseif ($consoleSid -ne $jobSid) { logoff $consoleSid } else { tsdiscon $consoleSid }
+            $runSid = $null
+            $rdEnd = (Get-Date).AddMinutes(3)
+            while ($null -eq $runSid) {
+              foreach ($line in ((qwinsta | Out-String) -split "`r?`n")) { if ($line -match '^\s*>?\S+\s+run\s+(\d+)\s+Active') { $runSid = [int]$Matches[1] } }
+              if ($null -eq $runSid) { if ((Get-Date) -gt $rdEnd) { break }; Start-Sleep -Seconds 3 }
+            }
+            if ($null -eq $runSid) {
+              Write-Host "::notice title=Log in as run::No desktop for run appeared. Connect with RDP as run (address $tsIP port 3389, password = RUN_PASSWORD), then in that session run:  tscon %sessionname% /dest:console  and RustDesk follows. This job watches for 20 minutes"
+              $rdEnd = (Get-Date).AddMinutes(20)
+              while ($null -eq $runSid) {
+                foreach ($line in ((qwinsta | Out-String) -split "`r?`n")) { if ($line -match '^\s*>?console\s+run\s+(\d+)\s+Active') { $runSid = [int]$Matches[1] } }
+                if ($null -eq $runSid) { if ((Get-Date) -gt $rdEnd) { break }; Start-Sleep -Seconds 5 }
+              }
+            }
+            if ($null -eq $runSid) {
+              Write-Host "::warning::No desktop session for run appeared, so RustDesk stays on the default account"
+            } else {
+              $rdEnd = (Get-Date).AddMinutes(3)
+              while (-not (Test-NetConnection -ComputerName $tsIP -Port 21118 -InformationLevel Quiet -WarningAction SilentlyContinue)) { if ((Get-Date) -gt $rdEnd) { break }; Start-Sleep -Seconds 3 }
+              if (Test-NetConnection -ComputerName $tsIP -Port 21118 -InformationLevel Quiet -WarningAction SilentlyContinue) { Write-Host "=== READY (desktop is run) ===" } else { Write-Host "::warning::RustDesk is not reachable on port 21118 after the switch" }
+            }
+          }
+          Remove-Item Env:RUN_PASSWORD, Env:TS_OAUTH_CLIENT_ID, Env:TS_OAUTH_CLIENT_SECRET -ErrorAction SilentlyContinue
+          Remove-Variable securePass, tokenBody, tokenResp, keyBody, keyResp -ErrorAction SilentlyContinue
+          while ($true) { Write-Host "[$(Get-Date)] Active"; Start-Sleep -Seconds 300 }
+  macos:
+    needs: select-os
+    if: needs.select-os.outputs.macos != '[]'
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.select-os.outputs.macos) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 360
+    env:
+      OS_LABEL: ${{ matrix.os }}
+      RUN_DESKTOP: ${{ inputs.run_desktop }}
+      RUN_PASSWORD: ${{ secrets.RUN_PASSWORD }}
+      VNC_PASSWORD: ${{ secrets.VNC_PASSWORD }}
+      TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+      TS_OAUTH_CLIENT_SECRET: ${{ secrets.TS_OAUTH_CLIENT_SECRET }}
+    steps:
+      - name: build
+        shell: bash
+        run: |
+          if [ "${#RUN_PASSWORD}" -lt 12 ]; then echo "::error::RUN_PASSWORD must be set and at least 12 characters"; exit 1; fi
+          if [ -z "$VNC_PASSWORD" ]; then echo "::error::VNC_PASSWORD not set (max 8 chars)"; exit 1; fi
+          if [ "$(printf "%s" "$VNC_PASSWORD" | wc -c | tr -d ' ')" -gt 8 ]; then echo "::error::VNC_PASSWORD must be 8 chars or fewer"; exit 1; fi
+          sudo sysadminctl -addUser run -fullName "Run" -password "$RUN_PASSWORD" -admin
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -configure -clientopts -setvnclegacy -vnclegacy yes -setvncpw -vncpw "$VNC_PASSWORD"
+          sudo /System/Library/CoreServices/RemoteManagement/ARDAgent.app/Contents/Resources/kickstart \
+            -activate -configure -access -on -users run -privs -all -restart -agent
+          TCC_DB="/Library/Application Support/com.apple.TCC/TCC.db"
+          for SERVICE in "kTCCServiceScreenCapture" "kTCCServiceAccessibility" "kTCCServicePostEvent" "kTCCServiceListenEvent"; do
+            for CLIENT in "com.apple.RemoteDesktopAgent" "com.apple.screensharing.agent" "com.carriez.rustdesk"; do
+              sudo sqlite3 "$TCC_DB" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) VALUES ('$SERVICE', '$CLIENT', 0, 2, 4, 1);" \
+                || { echo "::error::Could not write the screen-sharing permissions (TCC) - this macOS image may block it"; exit 1; }
+            done
+          done
+          env -i /usr/bin/caffeinate -dimsu > /dev/null 2>&1 &
+          RD_TAG=$(curl -fsSIL -o /dev/null -w '%{url_effective}' https://github.com/rustdesk/rustdesk/releases/latest || true)
+          RD_TAG=${RD_TAG##*/}
+          case "$RD_TAG" in [0-9]*.[0-9]*.[0-9]*) ;; *) RD_TAG=1.5.0 ;; esac
+          case "$(uname -m)" in arm64) RD_ARCH=aarch64 ;; *) RD_ARCH=x86_64 ;; esac
+          curl -fsSL -o /tmp/rustdesk.dmg "https://github.com/rustdesk/rustdesk/releases/download/$RD_TAG/rustdesk-$RD_TAG-$RD_ARCH.dmg" \
+            || { echo "::error::Could not download RustDesk $RD_TAG"; exit 1; }
+          mkdir -p /tmp/rdmnt
+          hdiutil attach /tmp/rustdesk.dmg -nobrowse -quiet -mountpoint /tmp/rdmnt <<< Y
+          sudo ditto /tmp/rdmnt/RustDesk.app /Applications/RustDesk.app
+          hdiutil detach /tmp/rdmnt -quiet
+          open /Applications/RustDesk.app
+          NODE="gh-${OS_LABEL//./-}-$GITHUB_RUN_ID"
+          ACCESS_TOKEN=$(printf 'data = "client_id=%s&client_secret=%s"\n' "$TS_OAUTH_CLIENT_ID" "$TS_OAUTH_CLIENT_SECRET" \
+            | curl -fsS -K - "https://api.tailscale.com/api/v2/oauth/token" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])") \
+            || { echo "::error::Tailscale OAuth token request failed"; exit 1; }
+          echo "::add-mask::$ACCESS_TOKEN"
+          TS_KEY=$(printf 'header = "Authorization: Bearer %s"\n' "$ACCESS_TOKEN" \
+            | curl -fsS -K - -H "Content-Type: application/json" \
+              -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:ci"]}}},"expirySeconds":600}' \
+              "https://api.tailscale.com/api/v2/tailnet/-/keys" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['key'])") \
+            || { echo "::error::Tailscale auth key request failed - check the OAuth client scope and tag:ci"; exit 1; }
+          echo "::add-mask::$TS_KEY"
+          brew install tailscale
+          sudo tailscaled >/dev/null 2>&1 &
+          for i in $(seq 1 30); do if [ -S /var/run/tailscaled.socket ]; then break; fi; sleep 1; done
+          sudo tailscale up --authkey="$TS_KEY" --hostname="$NODE" --timeout=120s
+          TS_IP=$(tailscale ip -4 2>/dev/null || true)
+          if [ -z "$TS_IP" ]; then echo "::error::Tailscale IP not assigned"; exit 1; fi
+          RD=/Applications/RustDesk.app/Contents/MacOS/RustDesk
+          for i in $(seq 1 100); do
+            RD_OUT=$(sudo "$RD" --password "$RUN_PASSWORD" 2>&1 || true)
+            case "$RD_OUT" in *Done!*) break ;; esac
+            sleep 3
+          done
+          case "$RD_OUT" in *Done!*) ;; *) echo "::error::RustDesk did not accept the password: $RD_OUT"; exit 1 ;; esac
+          sudo "$RD" --option direct-server Y
+          sudo "$RD" --option whitelist 100.64.0.0/10
+          sudo "$RD" --option verification-method use-permanent-password
+          sudo "$RD" --option approve-mode password
+          sudo "$RD" --option av1-test N
+          RD_UP=no
+          for i in $(seq 1 30); do if (echo > "/dev/tcp/$TS_IP/21118") 2>/dev/null; then RD_UP=yes; break; fi; sleep 2; done
+          if [ "$RD_UP" != yes ]; then echo "::error::RustDesk port 21118 not reachable"; exit 1; fi
+          echo "Mac: macOS $(sw_vers -productVersion), $(uname -m)"
+          tmo() { perl -e 'alarm shift @ARGV; exec @ARGV' "$@"; }
+          export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_INSTALL_CLEANUP=1
+          if tmo 300 brew install switchaudio-osx > /tmp/sound.log 2>&1 && tmo 300 brew install blackhole-2ch >> /tmp/sound.log 2>&1; then
+            sudo killall coreaudiod >> /tmp/sound.log 2>&1 || true
+            sleep 5
+            tmo 60 SwitchAudioSource -t output -s "BlackHole 2ch" >> /tmp/sound.log 2>&1 || true
+            tmo 60 SwitchAudioSource -t input -s "BlackHole 2ch" >> /tmp/sound.log 2>&1 || true
+            sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) VALUES ('kTCCServiceMicrophone', 'com.carriez.rustdesk', 0, 2, 4, 1);" >> /tmp/sound.log 2>&1 || true
+            echo "Sound: default input is $(SwitchAudioSource -c -t input || true), default output is $(SwitchAudioSource -c -t output || true)"
+          else
+            echo "::warning::Could not install the virtual sound device, so there may be no sound"
+            tail -n 8 /tmp/sound.log
+          fi
+          SCREEN_USER=$(stat -f%Su /dev/console || true)
+          echo "::notice title=Mac accounts::On screen: ${SCREEN_USER:-unknown}. Its password is not known and macOS does not let a script reset it. The known account is run: in password boxes type run as the name and your password"
+          echo "=== READY ==="
+          if [ "$RUN_DESKTOP" = true ]; then
+            CG="/System/Library/CoreServices/Menu Extras/User.menu/Contents/Resources/CGSession"
+            RUN_UID=$(id -u run)
+            CUR=$(stat -f%Su /dev/console || true)
+            echo "::notice title=Move desktop to run::console user ${CUR:-none}, run uid $RUN_UID, switch tool $([ -x "$CG" ] && echo found || echo missing)"
+            SA=/Users/run/Library/Preferences/com.apple.SetupAssistant
+            sudo mkdir -p /Users/run/Library/Preferences
+            for KEY in DidSeeCloudSetup DidSeeSiriSetup DidSeePrivacy DidSeeAccessibility DidSeeScreenTime DidSeeApplePaySetup DidSeeSyncSetup DidSeeSyncSetup2 DidSeeTouchIDSetup; do sudo defaults write "$SA" "$KEY" -bool true || true; done
+            sudo defaults write "$SA" GestureMovieSeen -string none || true
+            sudo defaults write "$SA" LastSeenCloudProductVersion -string "$(sw_vers -productVersion)" || true
+            sudo defaults write "$SA" LastSeenBuddyBuildVersion -string "$(sw_vers -buildVersion)" || true
+            sudo chown -R run:staff /Users/run/Library || true
+            if [ -x "$CG" ] && [ -n "$CUR" ] && [ "$CUR" != root ] && [ "$CUR" != run ]; then
+              LOGINPID=$(pgrep -x -u "$CUR" loginwindow | head -n 1 || true)
+              if [ -n "$LOGINPID" ] && sudo dscl . -passwd /Users/run ""; then
+                sudo launchctl bsexec "$LOGINPID" "$CG" -switchToUserID "$RUN_UID" || echo "::warning::The switch command returned an error"
+                for i in $(seq 1 30); do if sudo launchctl print "gui/$RUN_UID" > /dev/null 2>&1; then break; fi; sleep 2; done
+                for i in 1 2 3; do
+                  sudo dscl . -passwd /Users/run "" "$RUN_PASSWORD" > /dev/null 2>&1 || true
+                  if sudo dscl . -authonly run "$RUN_PASSWORD" > /dev/null 2>&1; then break; fi
+                  sleep 2
+                done
+                sudo dscl . -authonly run "$RUN_PASSWORD" > /dev/null 2>&1 || echo "::warning::Could not put the password of run back. Set it with: sudo dscl . -passwd /Users/run YOURPASSWORD"
+              else
+                echo "::warning::Automatic switch not started: loginwindow pid ${LOGINPID:-none}, or the password of run could not be cleared"
+              fi
+            fi
+            if ! sudo launchctl print "gui/$RUN_UID" > /dev/null 2>&1; then
+              echo "::notice title=Log in as run::Log in as run with a VNC client that asks for a user name (RealVNC Viewer or Apple Screen Sharing): address $TS_IP port 5900, user run, password = RUN_PASSWORD. This job watches for 20 minutes and then starts RustDesk for run by itself"
+              for i in $(seq 1 240); do if sudo launchctl print "gui/$RUN_UID" > /dev/null 2>&1; then break; fi; sleep 5; done
+            fi
+            if sudo launchctl print "gui/$RUN_UID" > /dev/null 2>&1; then
+              sleep 10
+              sudo pkill -x RustDesk || true
+              sleep 3
+              sudo launchctl asuser "$RUN_UID" sudo -u run /usr/bin/open /Applications/RustDesk.app || echo "::warning::Could not start RustDesk for run"
+              for i in $(seq 1 100); do
+                RD_OUT=$(sudo "$RD" --password "$RUN_PASSWORD" 2>&1 || true)
+                case "$RD_OUT" in *Done!*) break ;; esac
+                sleep 3
+              done
+              sudo "$RD" --option direct-server Y || true
+              sudo "$RD" --option whitelist 100.64.0.0/10 || true
+              sudo "$RD" --option verification-method use-permanent-password || true
+              sudo "$RD" --option approve-mode password || true
+              sudo "$RD" --option av1-test N || true
+              sudo sqlite3 "/Users/run/Library/Application Support/com.apple.TCC/TCC.db" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version) VALUES ('kTCCServiceMicrophone', 'com.carriez.rustdesk', 0, 2, 4, 1);" > /dev/null 2>&1 || true
+              sudo launchctl asuser "$RUN_UID" sudo -u run SwitchAudioSource -t output -s "BlackHole 2ch" > /dev/null 2>&1 || true
+              sudo launchctl asuser "$RUN_UID" sudo -u run SwitchAudioSource -t input -s "BlackHole 2ch" > /dev/null 2>&1 || true
+              RD_UP=no
+              for i in $(seq 1 30); do if (echo > "/dev/tcp/$TS_IP/21118") 2>/dev/null; then RD_UP=yes; break; fi; sleep 2; done
+              if [ "$RD_UP" = yes ]; then echo "=== READY (desktop is run) ==="; else echo "::warning::RustDesk for run is not reachable on port 21118"; fi
+            else
+              echo "::warning::No desktop session for run appeared, so RustDesk stays on the default account"
+            fi
+          fi
+          exec env -i PATH="$PATH" HOME="$HOME" bash -c 'while true; do echo "[$(date)] Active"; sleep 300; done'
