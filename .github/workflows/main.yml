@@ -242,7 +242,7 @@ jobs:
               return False
           def start_rpc(host):
               for port in RPCS:
-                  proc = subprocess.Popen([os.path.join(BIN, "ggml-rpc-server.exe"), "-H", host, "-p", str(port), "-t", str(max(1, (os.cpu_count() or 2) // 2))], cwd=BIN)
+                  proc = subprocess.Popen([os.path.join(BIN, "ggml-rpc-server.exe"), "-H", host, "-p", str(port), "-t", str(max(1, (os.cpu_count() or 2) // 2))], cwd=BIN, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
                   began = time.time()
                   wait(lambda: proc.poll() is not None or taken(host, port) or time.time() - began > 15, 60, "the RPC server to start")
                   if proc.poll() is None:
@@ -396,7 +396,7 @@ jobs:
               when = lambda j, label: (calendar.timegm(time.strptime(j["started_at"], "%Y-%m-%dT%H:%M:%SZ")) + GRACE * LABELS.index(label), LABELS.index(label))
               return twin["status"] == "in_progress" and when(twin, other) < when(mine, LABEL)
           if beaten():
-              say(f"{ROLE} already runs on the other Windows version, so this {LABEL} runner stops here")
+              print(f"::notice::{ROLE} already runs on the other Windows version, so this {LABEL} runner stops on purpose")
               sys.exit(0)
           if len(CID) < 4 or len(CSEC) < 4:
               fail("Set the secrets TS_OAUTH_CLIENT_ID and TS_OAUTH_CLIENT_SECRET")
@@ -473,6 +473,8 @@ jobs:
                       say(f"worker alive, free RAM {gb(ram()[0])}")
                       STOP.wait(60)
                   print("The head is finished, shutting down")
+              except KeyboardInterrupt:
+                  say("The run was cancelled, stopping this worker")
               finally:
                   if rpc is not None:
                       rpc.terminate()
@@ -549,7 +551,7 @@ jobs:
               fetch(URL, model, SIZE) or fail("Could not download the model")
               say(f"model downloaded in {(time.time() - t0) / 60:.1f} min")
               AP = wait(lambda: pick(APIS), 30, "a usable port for the web server")
-              srv = subprocess.Popen([os.path.join(BIN, "llama-server.exe"), "-m", model, "--rpc", ",".join(f"{ip}:{ask(ip, b'RPC')}" for ip in WIPS), "--host", IP, "--port", str(AP), "-c", "8192", "-np", "1", "--cache-ram", "1024", "--api-key", API_KEY, "--cors-origins", f"http://{IP}:{AP}", "-ngl", "999", "-fit", "off"], cwd=BIN)
+              srv = subprocess.Popen([os.path.join(BIN, "llama-server.exe"), "-m", model, "--rpc", ",".join(f"{ip}:{ask(ip, b'RPC')}" for ip in WIPS), "--host", IP, "--port", str(AP), "-c", "8192", "-np", "1", "--cache-ram", "1024", "--api-key", API_KEY, "--cors-origins", f"http://{IP}:{AP}", "-ngl", "999", "-fit", "off"], cwd=BIN, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
               beat = [0.0]
               def loaded():
                   srv.poll() is None or fail(f"llama-server stopped with code {srv.returncode}, see the log lines above")
@@ -579,6 +581,8 @@ jobs:
                   say(f"serving, {int((until - time.time()) / 60)} min left, " + memory_line())
                   time.sleep(min(60, max(1, until - time.time())))
               print("Time is up")
+          except KeyboardInterrupt:
+              say("The run was cancelled, stopping the cluster")
           finally:
               if srv is not None:
                   srv.terminate()
